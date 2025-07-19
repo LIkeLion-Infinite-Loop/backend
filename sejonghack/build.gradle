@@ -38,6 +38,13 @@ dependencies {
 	// Test
 	testImplementation 'org.springframework.boot:spring-boot-starter-test'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+
+	// JSON 라이브러리
+	implementation 'org.json:json:20240303'
+
+	// Apache POI (엑셀 처리)
+	implementation 'org.apache.poi:poi:5.2.5'
+	implementation 'org.apache.poi:poi-ooxml:5.2.5'
 	
 }
 
