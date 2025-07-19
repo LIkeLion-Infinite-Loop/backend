@@ -45,20 +45,6 @@ dependencies {
 	// Apache POI (엑셀 처리)
 	implementation 'org.apache.poi:poi:5.2.5'
 	implementation 'org.apache.poi:poi-ooxml:5.2.5'
-
-<<<<<<< Updated upstream
-	testImplementation 'io.rest-assured:rest-assured:5.3.0'
-
-	// JSON 처리용 org.json
-	implementation 'org.json:json:20230618'
-
-	// Apache POI (엑셀용)
-	implementation 'org.apache.poi:poi:5.2.3'
-	implementation 'org.apache.poi:poi-ooxml:5.2.3'
-
-=======
->>>>>>> Stashed changes
-
 }
 
 tasks.named('test') {
