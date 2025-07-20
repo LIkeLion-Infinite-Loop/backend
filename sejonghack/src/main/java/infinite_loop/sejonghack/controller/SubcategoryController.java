@@ -7,6 +7,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
+
 @RestController
 @RequestMapping("/api/subcategories")
 @RequiredArgsConstructor
@@ -27,6 +29,13 @@ public class SubcategoryController {
                 .build();
 
         return ResponseEntity.ok(response);
+    }
+
+    // 카테고리 ID로 서브카테고리 목록 조회
+    @GetMapping("/category/{categoryId}")
+    public ResponseEntity<List<Subcategory>> getSubcategoriesByCategory(@PathVariable Long categoryId) {
+        List<Subcategory> subcategories = subcategoryService.findByCategoryId(categoryId);
+        return ResponseEntity.ok(subcategories);
     }
 
 }
