@@ -46,6 +46,12 @@ dependencies {
 	implementation 'org.apache.poi:poi:5.2.5'
 	implementation 'org.apache.poi:poi-ooxml:5.2.5'
 
+	// ✅ Spring Security (비밀번호 암호화 등)
+	implementation 'org.springframework.boot:spring-boot-starter-security'
+
+	// ✅ 테스트용 Spring Security 모듈 추가 (csrf() 지원)
+	testImplementation 'org.springframework.security:spring-security-test'
+
 
 }
 

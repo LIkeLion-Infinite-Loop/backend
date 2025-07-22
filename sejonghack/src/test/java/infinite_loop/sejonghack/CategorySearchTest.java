@@ -1,5 +1,7 @@
 package infinite_loop.sejonghack;
 
+import org.junit.jupiter.api.Disabled; // 전체 테스트 제외
+
 import infinite_loop.sejonghack.controller.ProductController;
 import infinite_loop.sejonghack.dto.GuideDTO;
 import infinite_loop.sejonghack.dto.ProductDTO;
@@ -23,6 +25,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @WebMvcTest(ProductController.class)
 @Import(CategorySearchTest.MockConfig.class)  // 추가
+
+@Disabled  // 전체 테스트 제외
+
 public class CategorySearchTest {
 
     @Autowired

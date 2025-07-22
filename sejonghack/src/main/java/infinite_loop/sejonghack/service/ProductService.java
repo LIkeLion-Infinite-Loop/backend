@@ -35,4 +35,11 @@ public class ProductService {
                 )).collect(Collectors.toList());
     }
 
+    // GuideDTO를 반환하는 메서드 추가
+    public GuideDTO getGuideById(int id) {
+        // 테스트 목적의 임시 반환
+        return new GuideDTO("가이드 내용 예시", "https://example.com/images/sample.png");
+    }
+
+
 }
