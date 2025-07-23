@@ -6,6 +6,7 @@ spring:
     password: ${DB_PASS}
     hikari:
       maximum-pool-size: 10
+
   jpa:
     hibernate:
       ddl-auto: update
@@ -14,6 +15,11 @@ spring:
       hibernate:
         dialect: org.hibernate.dialect.MySQLDialect
         format_sql: true
+
   jackson:
     property-naming-strategy: SNAKE_CASE
 
+jwt:
+  secret: dGhpc2lzbXl2ZXJ5c2VjdXJlc2VjcmV0a2V5Zm9yand0MTIz
+  access-token-expiration: 3600000         # 1시간
+  refresh-token-expiration: 604800000      # 7일

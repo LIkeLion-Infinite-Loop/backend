@@ -2,11 +2,13 @@ package infinite_loop.sejonghack.service;
 
 import infinite_loop.sejonghack.domain.User;
 import infinite_loop.sejonghack.dto.*;
+import infinite_loop.sejonghack.jwt.JwtProvider;
 import infinite_loop.sejonghack.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 @Service
@@ -15,6 +17,8 @@ public class UserService {
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
+    private final JwtProvider jwtProvider;
+
 
     /**
      * 마이페이지 - 내 정보 조회 (UserResponseDto 버전)
@@ -60,27 +64,35 @@ public class UserService {
         userRepository.save(user);
     }
 
-    /**
-     * ✅ 테스트용: 마이페이지 - 사용자 정보 조회 (UserMyPageResponseDto)
-     */
-    public UserMyPageResponseDto getMyPage(Long userId) {
-        // 테스트용 임시 데이터 반환 (실제 DB 연동 시 수정 필요)
-        return new UserMyPageResponseDto(
-                "홍길동",
-                "hong@test.com",
-                "길동이",
-                "https://example.com/profile.jpg",
-                1230
-        );
+    public void signup(SignupRequestDto dto) {
+        if (userRepository.existsByEmail(dto.getEmail())) {
+            throw new IllegalArgumentException("이미 사용 중인 이메일입니다.");
+        }
+
+        User user = User.builder()
+                .name(dto.getName())
+                .email(dto.getEmail())
+                .password(passwordEncoder.encode(dto.getPassword()))
+                .nickname(dto.getNickname())
+                .totalPoint(0)
+                .createdAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.now())
+                .build();
+
+        userRepository.save(user);
     }
 
-    /**
-     * ✅ 테스트용: 최근 분리배출 검색어 조회
-     */
-    public List<RecentSearchResponseDto> getRecentSearches(Long userId) {
-        return List.of(
-                new RecentSearchResponseDto("플라스틱컵", "plastic.jpg"),
-                new RecentSearchResponseDto("캔", "can.jpg")
-        );
+    public LoginResponseDto login(LoginRequestDto dto) {
+        User user = userRepository.findByEmail(dto.getEmail())
+                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 이메일입니다."));
+
+        if (!passwordEncoder.matches(dto.getPassword(), user.getPassword())) {
+            throw new IllegalArgumentException("비밀번호가 일치하지 않습니다.");
+        }
+
+        String accessToken = jwtProvider.createAccessToken(user.getId(), user.getEmail());
+        String refreshToken = jwtProvider.createRefreshToken(user.getId(), user.getEmail());
+
+        return new LoginResponseDto(accessToken, refreshToken);
     }
 }

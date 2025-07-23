@@ -1,3 +1,4 @@
+// User.java
 package infinite_loop.sejonghack.domain;
 
 import jakarta.persistence.*;
@@ -18,33 +19,29 @@ public class User {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(nullable = false, length = 100)
     private String name;
-
-    @Column(nullable = false, unique = true, length = 255)
     private String email;
-
-    @Column(nullable = false, length = 255)
     private String password;
-
-    @Column(name = "total_point")
-    private Integer totalPoint = 0;
-
-    // ✅ 마이페이지용 필드 추가
-    @Column(length = 100)
     private String nickname;
 
-    @Column(name = "profile_img", length = 512)
+    @Column(name = "profile_img")
     private String profileImg;
 
-    @Column(name = "created_at", updatable = false)
-    private LocalDateTime createdAt = LocalDateTime.now();
+    @Column(name = "total_point")
+    private Integer totalPoint;
 
-    @Column(name = "updated_at")
-    private LocalDateTime updatedAt = LocalDateTime.now();
+    private LocalDateTime createdAt;
+    private LocalDateTime updatedAt;
+
+    @PrePersist
+    public void prePersist() {
+        this.createdAt = LocalDateTime.now();
+        this.updatedAt = LocalDateTime.now();
+        this.totalPoint = 0;
+    }
 
     @PreUpdate
-    public void updateTimestamp() {
+    public void preUpdate() {
         this.updatedAt = LocalDateTime.now();
     }
 }
