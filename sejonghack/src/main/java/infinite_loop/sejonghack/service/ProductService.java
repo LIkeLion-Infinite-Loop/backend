@@ -23,7 +23,7 @@ public class ProductService {
                 .orElseThrow(() -> new NoSuchElementException("해당 바코드의 제품을 찾을 수 없습니다."));
     }
 
-    // 키워드로 제품 검색  
+    // 키워드로 제품 검색   
     public List<ProductDTO> searchProducts(String keyword) {
         List<Product> products = productRepository.findByProductNameContaining(keyword);
 
