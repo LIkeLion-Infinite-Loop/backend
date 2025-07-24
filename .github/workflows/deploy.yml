@@ -1,4 +1,4 @@
-name: Deploy to Oracle VM
+name: Deploy to VM
 
 on:
   push:
@@ -10,15 +10,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Set up SSH key
-        uses: webfactory/ssh-agent@v0.7.0
-        with:
-          ssh-private-key: ${{ secrets.VM_SSH_KEY }}
-
-      - name: Deploy to Oracle VM
+      - name: Deploy over SSH
         uses: appleboy/ssh-action@master
         with:
           host: ${{ secrets.VM_HOST }}
@@ -27,13 +22,18 @@ jobs:
           port: 22
           script: |
             cd ~/backend/sejonghack
+
+            echo "git pull"
             git pull origin develop
 
-            # 환경변수 설정
-            export DB_URL="jdbc:mysql://40.233.103.122:3306/sejongdb?useSSL=true&requireSSL=true&verifyServerCertificate=false&serverTimezone=UTC"
-            export DB_USER="jun"
-            export DB_PASS="CgD)@voN%_4~tDsiWPLhb"
-
+            echo "build without tests"
             ./gradlew build -x test
+
+            echo "kill previous java processes"
             pkill -f 'java -jar' || true
-            nohup java -jar build/libs/sejonghack-0.0.1-SNAPSHOT.jar > nohup.out 2>&1 &
+
+            echo "run new jar in background"
+            DB_URL="jdbc:mysql://40.233.103.122:3306/sejongdb?useSSL=true&requireSSL=true&verifyServerCertificate=false&serverTimezone=UTC" \
+            DB_USER="jun" \
+            DB_PASS="CgD)@voN%_4~tDsiWPLhb" \
+            nohup java -jar build/libs/sejonghack-0.0.1-SNAPSHOT.jar > nohup.out 2>&1 & disown
