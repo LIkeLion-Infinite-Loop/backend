@@ -1,0 +1,25 @@
+name: Auto Deploy to VM on Develop Push
+
+on:
+  push:
+    branches:
+      - develop
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: SSH into VM and Pull Latest Code
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USER }}
+          key: ${{ secrets.VM_SSH_KEY }}
+          port: 22
+          script: |
+            cd ~/backend
+            git pull origin develop
+            ./gradlew build
+            pkill -f 'java -jar' || true
+            nohup java -jar build/libs/sejonghack-0.0.1-SNAPSHOT.jar &
