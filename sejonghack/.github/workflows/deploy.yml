@@ -22,7 +22,7 @@ jobs:
         run: |
           ssh -o StrictHostKeyChecking=no ubuntu@${{ secrets.HOST }} << 'EOF'
             cd ~/backend/sejonghack
-            git pull origin main
+            git pull origin develop
             ./gradlew clean build
             sudo pkill -f 'java -jar'
             nohup java -jar ./build/libs/*.jar > app.log 2>&1 &
