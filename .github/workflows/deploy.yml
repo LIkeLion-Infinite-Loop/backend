@@ -13,7 +13,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Deploy to VM via SSH
+      - name: Deploy over SSH
         uses: appleboy/ssh-action@master
         with:
           host: ${{ secrets.VM_HOST }}
@@ -30,12 +30,11 @@ jobs:
             ./gradlew build -x test
 
             echo "Killing existing Java process (if any)"
-            pkill -f 'java -jar' || true
+            (pkill -f 'java -jar') || true
 
             echo "Starting new application process"
             nohup java -jar \
               -Dspring.datasource.url="jdbc:mysql://40.233.103.122:3306/sejongdb?useSSL=true&requireSSL=true&verifyServerCertificate=false&serverTimezone=UTC" \
               -Dspring.datasource.username="jun" \
               -Dspring.datasource.password="CgD)@voN%_4~tDsiWPLhb" \
-              build/libs/sejonghack-0.0.1-SNAPSHOT.jar \
-              > nohup.out 2>&1 & disown
+              build/libs/sejonghack-0.0.1-SNAPSHOT.jar > nohup.out 2>&1 &
