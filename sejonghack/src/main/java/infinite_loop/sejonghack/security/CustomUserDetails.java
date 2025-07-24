@@ -13,13 +13,16 @@ public class CustomUserDetails implements UserDetails {
 
     private final User user;
 
+    public Long getId() {
+        return user.getId();
+    }
+
     public CustomUserDetails(User user) {
         this.user = user;
     }
 
     @Override
     public Collection<? extends GrantedAuthority> getAuthorities() {
-        // 권한 관련 로직이 필요하면 여기 추가
         return Collections.emptyList();
     }
 

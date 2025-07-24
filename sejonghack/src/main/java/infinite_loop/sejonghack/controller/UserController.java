@@ -33,8 +33,7 @@ public class UserController {
     // ✅ 마이페이지 - 사용자 정보
     @GetMapping("/me")
     public ResponseEntity<UserResponseDto> getMyPage(@AuthenticationPrincipal CustomUserDetails userDetails) {
-        Long userId = userDetails.getUser().getId();
-        return ResponseEntity.ok(userService.getMyInfo(userId));
+        return ResponseEntity.ok(userService.getMyInfo(userDetails.getId()));
     }
 
     // ✅ 마이페이지 - 최근 검색 목록
