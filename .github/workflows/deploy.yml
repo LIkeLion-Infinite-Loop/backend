@@ -1,4 +1,4 @@
-name: Auto Deploy to VM on Develop Push
+name: Auto Deploy to VM
 
 on:
   push:
@@ -10,15 +10,18 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: SSH into VM and Pull Latest Code
-        uses: appleboy/ssh-action@v1.0.3
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to VM via SSH
+        uses: appleboy/ssh-action@v1.0.0
         with:
           host: ${{ secrets.VM_HOST }}
           username: ${{ secrets.VM_USER }}
-          key: ${{ secrets.VM_SSH_KEY }}
+          key: ${{ secrets.VM_KEY }}
           port: 22
           script: |
-            cd ~/backend
+            cd ~/backend/sejonghack
             git pull origin develop
             ./gradlew build
             pkill -f 'java -jar' || true
