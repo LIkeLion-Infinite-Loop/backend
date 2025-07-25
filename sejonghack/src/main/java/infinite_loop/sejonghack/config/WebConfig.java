@@ -1,4 +1,3 @@
-// WebConfig.java
 package infinite_loop.sejonghack.config;
 
 import org.springframework.context.annotation.Bean;
@@ -14,7 +13,10 @@ public class WebConfig {
             @Override
             public void addCorsMappings(CorsRegistry registry) {
                 registry.addMapping("/**")
-                        .allowedOrigins("http://localhost:3000") // React dev server
+                        .allowedOrigins(
+                                "http://localhost:3000",           // 로컬 개발 환경
+                                "http://40.233.103.122:3000"       // 배포된 React 앱 주소
+                        )
                         .allowedMethods("*")
                         .allowedHeaders("*")
                         .allowCredentials(true);
