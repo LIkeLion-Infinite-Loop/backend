@@ -47,6 +47,7 @@ public class SecurityConfig {
         config.setAllowCredentials(true);  // 쿠키 허용
         config.setAllowedOrigins(Arrays.asList(
                 "http://localhost:3000",
+                "http://localhost:8081",           // ✅ 추가
                 "http://40.233.103.122:3000"
         ));
         config.addAllowedHeader("*");
