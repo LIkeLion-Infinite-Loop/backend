@@ -16,3 +16,5 @@
 | MySQL 드라이버        | 8.4.0  |
 | Lombok              | 최신 버전 (gradle 관리) |
 | Spring Boot Test    | 3.5.3  |
+# 테스트용 커밋
+# 다시 테스트
