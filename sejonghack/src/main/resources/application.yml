@@ -23,6 +23,10 @@ spring:
   jackson:
     property-naming-strategy: SNAKE_CASE
 
+logging:
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
+
 jwt:
   secret: dGhpc2lzbXl2ZXJ5c2VjdXJlc2VjcmV0a2V5Zm9yand0MTIz
   access-token-expiration: 3600000         # 1시간
