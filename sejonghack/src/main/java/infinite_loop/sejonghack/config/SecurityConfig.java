@@ -27,12 +27,14 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
-                .cors()  // cors 설정 추가
-                .and()
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/api/users/login", "/api/users/signup").permitAll()
+                        .requestMatchers(
+                                "/api/users/login",
+                                "/api/users/signup",
+                                "/api/users/reset-password"
+                        ).permitAll()
                         .anyRequest().authenticated()
                 )
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
@@ -40,14 +42,14 @@ public class SecurityConfig {
         return http.build();
     }
 
-    // CORS 설정
+    // ✅ CORS 필터만 유지 (http.cors() 제거)
     @Bean
     public CorsFilter corsFilter() {
         CorsConfiguration config = new CorsConfiguration();
-        config.setAllowCredentials(true);  // 쿠키 허용
+        config.setAllowCredentials(true);
         config.setAllowedOrigins(Arrays.asList(
                 "http://localhost:3000",
-                "http://localhost:8081",           // ✅ 추가
+                "http://localhost:8081",
                 "http://40.233.103.122:3000"
         ));
         config.addAllowedHeader("*");

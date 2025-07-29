@@ -20,9 +20,15 @@ public class User {
     private Long id;
 
     private String name;
+
+    @Column(unique = true)
     private String email;
+
     private String password;
+
     private String nickname;
+
+    private boolean isTempPassword;
 
     @Column(name = "profile_img")
     private String profileImg;
