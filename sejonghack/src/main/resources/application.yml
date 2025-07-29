@@ -11,6 +11,15 @@ spring:
     hikari:
       maximum-pool-size: 10
 
+  mail:
+    host: smtp.gmail.com
+    port: 587
+    username: ${MAIL_USERNAME}
+    password: ${MAIL_PASSWORD}
+    properties:
+      mail.smtp.auth: true
+      mail.smtp.starttls.enable: true
+
   jpa:
     hibernate:
       ddl-auto: update
@@ -28,6 +37,6 @@ logging:
     console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
 
 jwt:
-  secret: dGhpc2lzbXl2ZXJ5c2VjdXJlc2VjcmV0a2V5Zm9yand0MTIz
-  access-token-expiration: 3600000         # 1시간
-  refresh-token-expiration: 604800000      # 7일
+  secret: ${JWT_SECRET}
+  access-token-expiration: ${JWT_ACCESS_EXPIRATION}
+  refresh-token-expiration: ${JWT_REFRESH_EXPIRATION}

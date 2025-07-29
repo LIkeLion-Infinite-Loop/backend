@@ -5,11 +5,14 @@ import infinite_loop.sejonghack.dto.*;
 import infinite_loop.sejonghack.jwt.JwtProvider;
 import infinite_loop.sejonghack.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.mail.SimpleMailMessage;
+import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
@@ -18,6 +21,7 @@ public class UserService {
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtProvider jwtProvider;
+    private final JavaMailSender mailSender;
 
 
     /**
@@ -46,21 +50,6 @@ public class UserService {
         user.setNickname(dto.getNickname());
         user.setProfileImg(dto.getProfileImg());
 
-        userRepository.save(user);
-    }
-
-    /**
-     * 마이페이지 - 비밀번호 변경
-     */
-    public void changePassword(Long userId, PasswordChangeDto dto) {
-        User user = userRepository.findById(userId)
-                .orElseThrow(() -> new RuntimeException("사용자 없음"));
-
-        if (!passwordEncoder.matches(dto.getCurrentPassword(), user.getPassword())) {
-            throw new IllegalArgumentException("현재 비밀번호가 올바르지 않습니다.");
-        }
-
-        user.setPassword(passwordEncoder.encode(dto.getNewPassword()));
         userRepository.save(user);
     }
 
@@ -94,5 +83,37 @@ public class UserService {
         String refreshToken = jwtProvider.createRefreshToken(user.getId(), user.getEmail());
 
         return new LoginResponseDto(accessToken, refreshToken);
+    }
+
+    public void sendTemporaryPassword(String email) {
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new IllegalArgumentException("등록되지 않은 이메일입니다"));
+
+        String tempPassword = UUID.randomUUID().toString().substring(0, 10);
+        String encodedPassword = passwordEncoder.encode(tempPassword);
+
+        user.setPassword(encodedPassword);
+        user.setTempPassword(true);
+        userRepository.save(user);
+
+        sendEmail(email, tempPassword);
+    }
+
+    public void changePassword(User user, String currentPassword, String newPassword) {
+        if (!passwordEncoder.matches(currentPassword, user.getPassword())) {
+            throw new IllegalArgumentException("현재 비밀번호가 일치하지 않습니다.");
+        }
+
+        user.setPassword(passwordEncoder.encode(newPassword));
+        user.setTempPassword(false);
+        userRepository.save(user);
+    }
+
+    private void sendEmail(String to, String tempPassword) {
+        SimpleMailMessage message = new SimpleMailMessage();
+        message.setTo(to);
+        message.setSubject("[비우GO] 임시 비밀번호 안내");
+        message.setText("임시 비밀번호: " + tempPassword + "\n로그인 후 비밀번호를 꼭 변경해주세요.");
+        mailSender.send(message);
     }
 }
