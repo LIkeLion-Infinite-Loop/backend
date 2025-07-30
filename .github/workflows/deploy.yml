@@ -1,12 +1,14 @@
 name: Deploy to VM
 
 on:
-  push:
+  pull_request:
+    types: [closed]
     branches:
-      - develop
+      - master
 
 jobs:
   deploy:
+    if: github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'master' && github.event.pull_request.head.ref == 'develop'
     runs-on: ubuntu-latest
 
     steps:
@@ -18,7 +20,7 @@ jobs:
         with:
           host: ${{ secrets.VM_HOST }}
           username: ${{ secrets.VM_USER }}
-          key: ${{ secrets.VM_SSH_KEY }}
+          key: ${{ secrets.WM_SSH_KEY }}
           port: 22
           script: |
             chmod +x ~/deploy.sh
