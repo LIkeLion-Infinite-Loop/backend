@@ -33,12 +33,14 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         System.out.println("[JwtFilter] 토큰: " + token);
 
         if (token != null && jwtProvider.validateToken(token)) {
-            Claims claims = jwtProvider.parseToken(token);
-            String email = claims.getSubject();
-            System.out.println("[JwtFilter] 이메일 from 토큰: " + email);
-
             try {
+                Claims claims = jwtProvider.parseToken(token);
+                String email = claims.getSubject();
+                System.out.println("[JwtFilter] 이메일 from 토큰: " + email);
+
                 UserDetails userDetails = userDetailsService.loadUserByUsername(email);
+                System.out.println("[JwtFilter] userDetails: " + userDetails);
+
                 UsernamePasswordAuthenticationToken authentication =
                         new UsernamePasswordAuthenticationToken(
                                 userDetails, null, userDetails.getAuthorities());
@@ -46,12 +48,15 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
                 SecurityContextHolder.getContext().setAuthentication(authentication);
                 System.out.println("[JwtFilter] 인증 성공: " + userDetails.getUsername());
+
             } catch (Exception e) {
                 System.out.println("[JwtFilter] 인증 실패: " + e.getMessage());
+                e.printStackTrace();
             }
         } else {
             System.out.println("[JwtFilter] 토큰 없음 또는 유효하지 않음");
         }
+
 
         filterChain.doFilter(request, response);
     }
