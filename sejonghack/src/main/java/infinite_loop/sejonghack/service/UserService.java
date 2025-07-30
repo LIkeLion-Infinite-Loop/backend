@@ -7,6 +7,7 @@ import infinite_loop.sejonghack.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
@@ -116,4 +117,10 @@ public class UserService {
         message.setText("임시 비밀번호: " + tempPassword + "\n로그인 후 비밀번호를 꼭 변경해주세요.");
         mailSender.send(message);
     }
+
+    public User getUserByEmail(String email) {
+        return userRepository.findByEmail(email)
+                .orElseThrow(() -> new UsernameNotFoundException("해당 이메일의 유저가 없습니다."));
+    }
+
 }

@@ -1,5 +1,7 @@
 package infinite_loop.sejonghack.controller;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import infinite_loop.sejonghack.domain.User;
 import infinite_loop.sejonghack.dto.*;
 import infinite_loop.sejonghack.security.CustomUserDetails;
@@ -8,6 +10,7 @@ import infinite_loop.sejonghack.service.UserService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -63,8 +66,13 @@ public class UserController {
     @PostMapping("/change-password")
     public ResponseEntity<ChangePasswordResponseDto> changePassword(
             @RequestBody ChangePasswordRequestDto request,
-            @AuthenticationPrincipal User user) {
+            @AuthenticationPrincipal CustomUserDetails userDetails) throws JsonProcessingException {
+
+        User user = userDetails.getUser();
+
         userService.changePassword(user, request.getCurrentPassword(), request.getNewPassword());
         return ResponseEntity.ok(new ChangePasswordResponseDto("비밀번호가 성공적으로 변경되었습니다"));
     }
+
+
 }

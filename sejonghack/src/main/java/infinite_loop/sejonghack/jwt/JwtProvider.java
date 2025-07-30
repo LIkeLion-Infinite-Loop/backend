@@ -72,6 +72,7 @@ public class JwtProvider {
             System.out.println("[JwtProvider] 토큰 손상됨: " + e.getMessage());
         } catch (SignatureException e) {
             System.out.println("[JwtProvider] 서명 오류: " + e.getMessage());
+            e.printStackTrace();
         } catch (IllegalArgumentException e) {
             System.out.println("[JwtProvider] 잘못된 토큰: " + e.getMessage());
         }
