@@ -1,35 +1,60 @@
 package infinite_loop.hack.controller;
 
-import infinite_loop.hack.dto.QuizDtos.*;
+import infinite_loop.hack.dto.QuizDtos.CreateSessionRes;
+import infinite_loop.hack.dto.QuizDtos.SubmitReq;
+import infinite_loop.hack.dto.QuizDtos.SubmitRes;
+import infinite_loop.hack.security.CustomUserDetails;
 import infinite_loop.hack.service.QuizService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
+@RequiredArgsConstructor
 @RestController
 @RequestMapping("/api/quiz")
-@RequiredArgsConstructor
 public class QuizController {
+
     private final QuizService service;
 
-    // ★ JWT에서 userId 꺼내기 (프로젝트의 Security 설정에 맞게 수정)
-    private Long currentUserId(Authentication auth) {
-        // 임시: 토큰 연동 전이라면 1L로 두고 테스트 → 추후 JWT 정보에서 꺼내세요.
-        return 1L;
-    }
-
+    /**
+     * 퀴즈 세션 생성
+     * POST /api/quiz/sessions
+     */
     @PostMapping("/sessions")
     public ResponseEntity<CreateSessionRes> create(Authentication auth) {
-        var res = service.startSession(currentUserId(auth));
-        return ResponseEntity.status(201).body(res);
+        Long userId = currentUserId(auth);
+        CreateSessionRes res = service.startSession(userId);
+        return ResponseEntity.status(HttpStatus.CREATED).body(res);
     }
 
+    /**
+     * 정답 제출
+     * POST /api/quiz/sessions/{sessionId}/submit
+     * Body: { "answers": [ { "itemId": 101, "answerIdx": 1 }, ... ] }
+     *  - answerIdx는 1~4 범위
+     */
     @PostMapping("/sessions/{sessionId}/submit")
     public ResponseEntity<SubmitRes> submit(@PathVariable Long sessionId,
                                             @RequestBody SubmitReq req,
                                             Authentication auth) {
-        var res = service.submit(currentUserId(auth), sessionId, req.answers());
+        Long userId = currentUserId(auth);
+        SubmitRes res = service.submit(userId, sessionId, req.answers());
         return ResponseEntity.ok(res);
+    }
+
+    /**
+     * JWT에서 현재 사용자 id 추출
+     */
+    private Long currentUserId(Authentication authentication) {
+        if (authentication == null || authentication.getPrincipal() == null) {
+            throw new org.springframework.security.access.AccessDeniedException("UNAUTHENTICATED");
+        }
+        Object principal = authentication.getPrincipal();
+        if (principal instanceof CustomUserDetails cud && cud.getId() != null) {
+            return cud.getId();
+        }
+        throw new org.springframework.security.access.AccessDeniedException("UNAUTHENTICATED");
     }
 }
