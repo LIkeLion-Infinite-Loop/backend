@@ -6,6 +6,8 @@ import infinite_loop.hack.receipt.repository.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.*;
@@ -15,18 +17,19 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class ReceiptService {
 
+    private static final Logger log = LoggerFactory.getLogger(ReceiptService.class);
+
     private final ReceiptRepository receiptRepository;
     private final ReceiptItemRepository receiptItemRepository;
     private final DisposalHistoryRepository disposalHistoryRepository;
     private final OcrService ocrService;
+    private final GptService gptService;  // ✅ GPT 파서 주입
 
     /** 업로드: 영수증 엔티티 생성(PENDING) + OCR 실행 */
     @Transactional
     public ReceiptUploadResponseDto upload(Long userId, MultipartFile file) {
-        // OCR 실행
         String rawText = ocrService.extractText(file);
 
-        // 영수증 생성
         Receipt receipt = Receipt.builder()
                 .userId(userId)
                 .status(ReceiptStatus.PENDING)
@@ -71,19 +74,46 @@ public class ReceiptService {
                 .build();
     }
 
-    /** OCR 결과 파싱 → ReceiptItem 생성 */
+    /** OCR 결과 파싱 → ReceiptItem 생성 (GPT 연동) */
     @Transactional
     public void parse(Long receiptId) {
         Receipt r = getReceiptOrThrow(receiptId);
 
         if (r.getRawText() == null || r.getRawText().isBlank()) {
-            throw new IllegalStateException("NO_RAW_TEXT");
+            log.warn("[PARSE] rawText 비어있음. receiptId={}", receiptId);
+            r.setStatus(ReceiptStatus.FAILED);
+            return;
         }
 
-        // TODO: GPT 호출로 실제 품목 파싱
-        parseStub(r);
+        try {
+            List<ParsedItemDto> parsed = gptService.parseReceipt(r.getRawText());
+            int saved = 0;
 
-        r.setStatus(ReceiptStatus.PARSED);
+            for (ParsedItemDto dto : parsed) {
+                if (dto.getName() == null || dto.getName().isBlank()) continue;
+
+                int qty = (dto.getQuantity() == null || dto.getQuantity() <= 0) ? 1 : dto.getQuantity();
+                Category category = safeCategory(dto.getCategory());
+
+                ReceiptItem item = ReceiptItem.builder()
+                        .receipt(r)
+                        .name(dto.getName())
+                        .quantity(qty)
+                        .category(category)
+                        .source("GPT")
+                        .build();
+                receiptItemRepository.save(item);
+                saved++;
+            }
+
+            r.setStatus(saved > 0 ? ReceiptStatus.PARSED : ReceiptStatus.FAILED);
+            if (saved == 0) {
+                log.warn("[PARSE] 저장된 항목이 0개. GPT 응답 점검 필요. receiptId={}", receiptId);
+            }
+        } catch (Exception e) {
+            log.error("[PARSE] 예외 발생. FAILED 전환. receiptId={}", receiptId, e);
+            r.setStatus(ReceiptStatus.FAILED);
+        }
     }
 
     /** 항목 수정 */
@@ -194,18 +224,9 @@ public class ReceiptService {
                 .build();
     }
 
-    /** 더미 파서 (실제 GPT 파싱 전용) */
-    @Transactional
-    protected void parseStub(Receipt receipt) {
-        if (receipt.getStatus() == ReceiptStatus.PENDING) {
-            ReceiptItem sample = ReceiptItem.builder()
-                    .receipt(receipt)
-                    .name("제주 삼다수 500ml")
-                    .quantity(2)
-                    .category(Category.PLASTIC)
-                    .source("AUTO")
-                    .build();
-            receiptItemRepository.save(sample);
-        }
+    private Category safeCategory(String s) {
+        if (s == null) return Category.ETC;
+        try { return Category.valueOf(s.trim().toUpperCase()); }
+        catch (Exception e) { return Category.ETC; }
     }
 }
