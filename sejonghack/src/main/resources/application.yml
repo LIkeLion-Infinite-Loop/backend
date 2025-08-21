@@ -3,6 +3,9 @@ server:
   port: 8080
 
 spring:
+  main:
+    banner-mode: "console"
+
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
     url: ${DB_URL}
@@ -40,3 +43,7 @@ jwt:
   secret: ${JWT_SECRET}
   access-token-expiration: ${JWT_ACCESS_EXPIRATION}
   refresh-token-expiration: ${JWT_REFRESH_EXPIRATION}
+
+openai:
+  api:
+    key: ${OPENAI_API_KEY}
