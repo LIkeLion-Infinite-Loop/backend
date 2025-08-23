@@ -44,6 +44,24 @@ public class QuizController {
         return ResponseEntity.ok(res);
     }
 
+    // 활성 세션 조회 (재접속용)
+    @GetMapping("/sessions/active")
+    public ResponseEntity<CreateSessionRes> getActive(Authentication auth) {
+        Long userId = currentUserId(auth);
+        CreateSessionRes res = service.getActive(userId);
+        if (res == null) return ResponseEntity.noContent().build(); // 204
+        return ResponseEntity.ok(res);
+    }
+
+    // 특정 세션 ID로 조회 (409 응답의 Location 헤더 따라가기)
+    @GetMapping("/sessions/{sessionId}")
+    public ResponseEntity<CreateSessionRes> getById(@PathVariable Long sessionId, Authentication auth) {
+        Long userId = currentUserId(auth);
+        CreateSessionRes res = service.getById(userId, sessionId);
+        if (res == null) return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
+        return ResponseEntity.ok(res);
+    }
+
     /**
      * JWT에서 현재 사용자 id 추출
      */

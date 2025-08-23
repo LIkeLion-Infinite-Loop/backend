@@ -36,7 +36,9 @@ public class QuizService {
 
         // 2) 활성 세션 중복 금지
         var active = sessionRepo.findFirstByUserIdAndStatus(userId, Status.ACTIVE);
-        if (active.isPresent()) throw new IllegalStateException("SESSION_ALREADY_ACTIVE");
+        if (active.isPresent())
+            throw new infinite_loop.hack.exception.ActiveSessionConflictException(active.get().getId());
+
 
         // 3) 무작위 카테고리
         String category = QuizConstants.pickRandomCategory();
@@ -114,4 +116,47 @@ public class QuizService {
 
         return new SubmitRes(sessionId, s.getCategory(), correct, items.size(), totalPts, Instant.now());
     }
+
+    @Transactional(readOnly = true)
+    public CreateSessionRes getActive(Long userId) {
+        var active = sessionRepo.findFirstByUserIdAndStatus(userId, Status.ACTIVE).orElse(null);
+        if (active == null) return null;
+        if (active.isExpired()) {
+            active.setStatus(Status.EXPIRED);
+            sessionRepo.save(active);
+            return null;
+        }
+        return toCreateRes(active);
+    }
+
+    @Transactional(readOnly = true)
+    public CreateSessionRes getById(Long userId, Long sessionId) {
+        var s = sessionRepo.findById(sessionId).orElse(null);
+        if (s == null || !s.getUserId().equals(userId)) return null;
+        return toCreateRes(s);
+    }
+
+    private CreateSessionRes toCreateRes(QuizSession s) {
+        var items = itemRepo.findBySessionIdOrderByItemOrder(s.getId()).stream()
+                .map(it -> new CreateSessionRes.Item(
+                        it.getId(),
+                        it.getItemOrder(),
+                        it.getPrompt(),
+                        java.util.List.of(it.getChoice1(), it.getChoice2(), it.getChoice3(), it.getChoice4())
+                ))
+                .toList();
+
+        // 오늘 남은 횟수(1일 3회 기준)
+        java.time.LocalDate today = infinite_loop.hack.support.QuizConstants.todayKST();
+        java.time.Instant start = today.atStartOfDay(java.time.ZoneId.of("Asia/Seoul")).toInstant();
+        java.time.Instant end   = today.plusDays(1).atStartOfDay(java.time.ZoneId.of("Asia/Seoul")).toInstant();
+        int usedToday = sessionRepo.findByUserIdAndStartedAtBetween(s.getUserId(), start, end).size();
+        int attemptsLeft = Math.max(0, 3 - usedToday);
+
+        return new CreateSessionRes(
+                s.getId(), s.getExpiresAt(), s.getNumQuestions(), s.getCategory(),
+                attemptsLeft, items
+        );
+    }
+
 }

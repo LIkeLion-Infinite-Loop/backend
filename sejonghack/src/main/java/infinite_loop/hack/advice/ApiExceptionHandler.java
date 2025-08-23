@@ -6,6 +6,9 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
 
+import org.springframework.http.HttpHeaders;
+import infinite_loop.hack.exception.ActiveSessionConflictException;
+
 @RestControllerAdvice
 public class ApiExceptionHandler {
 
@@ -20,5 +23,23 @@ public class ApiExceptionHandler {
                 "success", false,
                 "error", Map.of("code", e.getMessage(), "message", e.getMessage())
         ));
+    }
+
+    // ★ 추가: 활성 세션 충돌 시 헤더 + 세션ID 바디로 내려주기
+    @ExceptionHandler(ActiveSessionConflictException.class)
+    public ResponseEntity<Map<String, Object>> handleActiveSession(ActiveSessionConflictException e) {
+        Long id = e.getSessionId();
+        HttpHeaders headers = new HttpHeaders();
+        headers.add("X-Active-Session-Id", String.valueOf(id));
+        headers.add("Location", "/api/quiz/sessions/" + id);
+
+        return new ResponseEntity<>(
+                Map.of(
+                        "success", false,
+                        "error", Map.of("code", "SESSION_ALREADY_ACTIVE", "sessionId", id)
+                ),
+                headers,
+                HttpStatus.CONFLICT
+        );
     }
 }
