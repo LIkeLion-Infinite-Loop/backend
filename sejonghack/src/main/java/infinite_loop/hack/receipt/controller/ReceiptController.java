@@ -2,6 +2,7 @@ package infinite_loop.hack.receipt.controller;
 
 import infinite_loop.hack.receipt.dto.*;
 import infinite_loop.hack.receipt.service.ReceiptService;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -9,6 +10,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
 import java.util.Map;
 
 @RestController
@@ -18,36 +20,55 @@ public class ReceiptController {
 
     private final ReceiptService receiptService;
 
-    /** 1) 영수증 업로드: OCR 실행 + Receipt(PENDING) 저장 */
+    /** (A) form-data 업로드: key=파일필드 (예: file) */
     @PostMapping(value = "/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<ReceiptUploadResponseDto> uploadReceipt(
             @AuthenticationPrincipal(expression = "id") Long userId,
-            @RequestPart("file") MultipartFile file
+            @RequestPart MultipartFile file
     ) {
         ReceiptUploadResponseDto resp = receiptService.upload(userId, file);
         return ResponseEntity.ok(resp);
     }
 
-    /** 2) OCR 결과 파싱 요청: GPT 호출 → 상태 반환(PARSED/FAILED) */
-    @PostMapping("/{receiptId}/parse")
-    public ResponseEntity<ReceiptStatusResponseDto> parseReceipt(@PathVariable Long receiptId) {
-        receiptService.parse(receiptId);
-        return ResponseEntity.ok(receiptService.getStatus(receiptId));
+    /** (B) 같은 경로에서 raw 이미지/바이너리도 지원 (key 없이 파일만 전송) */
+    @PostMapping(
+            value = "/upload",
+            consumes = {
+                    MediaType.IMAGE_JPEG_VALUE,
+                    MediaType.IMAGE_PNG_VALUE,
+                    MediaType.APPLICATION_OCTET_STREAM_VALUE
+            }
+    )
+    public ResponseEntity<ReceiptUploadResponseDto> uploadReceiptRaw(
+            @AuthenticationPrincipal(expression = "id") Long userId,
+            HttpServletRequest request
+    ) throws IOException {
+        byte[] bytes = request.getInputStream().readAllBytes();
+        if (bytes.length == 0) {
+            return ResponseEntity.badRequest().body(
+                    new ReceiptUploadResponseDto(null, "FAILED", "빈 바디입니다. 파일이 전송되지 않았습니다.")
+            );
+        }
+        ReceiptUploadResponseDto resp = receiptService.uploadFromBytes(userId, bytes);
+        return ResponseEntity.ok(resp);
     }
 
-    /** 3) 상태 조회 */
+    @PostMapping("/{receiptId}/parse")
+    public ResponseEntity<String> parseReceipt(@PathVariable Long receiptId) {
+        receiptService.parse(receiptId);
+        return ResponseEntity.ok("영수증 분석 완료 (PARSED)");
+    }
+
     @GetMapping("/{receiptId}/status")
     public ResponseEntity<ReceiptStatusResponseDto> getStatus(@PathVariable Long receiptId) {
         return ResponseEntity.ok(receiptService.getStatus(receiptId));
     }
 
-    /** 4) 아이템 목록 조회 */
     @GetMapping("/{receiptId}/items")
     public ResponseEntity<ReceiptItemsResponseDto> getItems(@PathVariable Long receiptId) {
         return ResponseEntity.ok(receiptService.getItems(receiptId));
     }
 
-    /** 5) 아이템 수정 */
     @PutMapping("/{receiptId}/items/{itemId}")
     public ResponseEntity<Void> modifyItem(
             @PathVariable Long receiptId,
@@ -58,7 +79,6 @@ public class ReceiptController {
         return ResponseEntity.noContent().build();
     }
 
-    /** 6) 아이템 삭제 */
     @DeleteMapping("/{receiptId}/items/{itemId}")
     public ResponseEntity<Void> deleteItem(
             @PathVariable Long receiptId,
@@ -68,7 +88,6 @@ public class ReceiptController {
         return ResponseEntity.noContent().build();
     }
 
-    /** 7) 아이템 수동 추가 */
     @PostMapping("/{receiptId}/items")
     public ResponseEntity<Long> addItem(
             @PathVariable Long receiptId,
@@ -78,7 +97,6 @@ public class ReceiptController {
         return ResponseEntity.ok(id);
     }
 
-    /** 8) 저장하기(확정) */
     @PostMapping("/{receiptId}/confirm")
     public ResponseEntity<Map<String, Object>> confirm(
             @AuthenticationPrincipal(expression = "id") Long userId,
