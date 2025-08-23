@@ -45,6 +45,21 @@ public class OcrService {
         }
     }
 
+    // 신규: raw bytes 버전
+    public String extractText(byte[] bytes) {
+        try {
+            String text = detectDocumentText(bytes);
+            if (text == null || text.isBlank()) {
+                text = detectText(bytes);
+            }
+            return text == null ? "" : text.trim();
+        } catch (Exception e) {
+            log.error("OCR 처리 실패", e);
+            return "";
+        }
+    }
+
+
     private String detectDocumentText(byte[] bytes) throws Exception {
         Image image = Image.newBuilder()
                 .setContent(ByteString.copyFrom(bytes))

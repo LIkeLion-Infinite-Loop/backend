@@ -44,6 +44,27 @@ public class ReceiptService {
         );
     }
 
+    @Transactional
+    public ReceiptUploadResponseDto uploadFromBytes(Long userId, byte[] bytes) {
+        String rawText = ocrService.extractText(bytes);
+        return savePending(userId, rawText);
+    }
+
+    private ReceiptUploadResponseDto savePending(Long userId, String rawText) {
+        Receipt receipt = Receipt.builder()
+                .userId(userId)
+                .status(ReceiptStatus.PENDING)
+                .rawText(rawText)
+                .build();
+        receiptRepository.save(receipt);
+
+        return new ReceiptUploadResponseDto(
+                receipt.getId(),
+                receipt.getStatus().name(),
+                "업로드 완료. 분석을 시작합니다."
+        );
+    }
+
     /** 상태 조회 */
     @Transactional(readOnly = true)
     public ReceiptStatusResponseDto getStatus(Long receiptId) {
