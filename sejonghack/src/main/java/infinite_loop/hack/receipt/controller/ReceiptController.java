@@ -53,10 +53,11 @@ public class ReceiptController {
         return ResponseEntity.ok(resp);
     }
 
+    /** (옵션) 수동 파싱 트리거 */
     @PostMapping("/{receiptId}/parse")
     public ResponseEntity<String> parseReceipt(@PathVariable Long receiptId) {
         receiptService.parse(receiptId);
-        return ResponseEntity.ok("영수증 분석 완료 (PARSED)");
+        return ResponseEntity.ok("영수증 분석 시작됨 (비동기)");
     }
 
     @GetMapping("/{receiptId}/status")

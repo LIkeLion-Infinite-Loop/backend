@@ -4,10 +4,10 @@ import infinite_loop.hack.receipt.domain.*;
 import infinite_loop.hack.receipt.dto.*;
 import infinite_loop.hack.receipt.repository.*;
 import lombok.RequiredArgsConstructor;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.*;
@@ -23,34 +23,24 @@ public class ReceiptService {
     private final ReceiptItemRepository receiptItemRepository;
     private final DisposalHistoryRepository disposalHistoryRepository;
     private final OcrService ocrService;
-    private final GptService gptService;  // ✅ GPT 파서 주입
+    private final GptService gptService;
+    private final ReceiptParseService receiptParseService; // ✅ 비동기 파서
 
-    /** 업로드: 영수증 엔티티 생성(PENDING) + OCR 실행 */
+    /** 업로드: OCR → 영수증 생성(PENDING) → 비동기 파싱 시작 */
     @Transactional
     public ReceiptUploadResponseDto upload(Long userId, MultipartFile file) {
         String rawText = ocrService.extractText(file);
-
-        Receipt receipt = Receipt.builder()
-                .userId(userId)
-                .status(ReceiptStatus.PENDING)
-                .rawText(rawText)
-                .build();
-        receiptRepository.save(receipt);
-
-        return new ReceiptUploadResponseDto(
-                receipt.getId(),
-                receipt.getStatus().name(),
-                "업로드 완료. 분석을 시작합니다."
-        );
+        return savePendingAndKickParse(userId, rawText);
     }
 
+    /** 바이너리 업로드 지원 */
     @Transactional
     public ReceiptUploadResponseDto uploadFromBytes(Long userId, byte[] bytes) {
         String rawText = ocrService.extractText(bytes);
-        return savePending(userId, rawText);
+        return savePendingAndKickParse(userId, rawText);
     }
 
-    private ReceiptUploadResponseDto savePending(Long userId, String rawText) {
+    private ReceiptUploadResponseDto savePendingAndKickParse(Long userId, String rawText) {
         Receipt receipt = Receipt.builder()
                 .userId(userId)
                 .status(ReceiptStatus.PENDING)
@@ -58,10 +48,17 @@ public class ReceiptService {
                 .build();
         receiptRepository.save(receipt);
 
+        //업로드 직후 비동기로 GPT 파싱 시작
+        try {
+            receiptParseService.parseAsync(receipt.getId());
+        } catch (Exception e) {
+            log.error("[UPLOAD] parseAsync 시작 실패 receiptId={}", receipt.getId(), e);
+        }
+
         return new ReceiptUploadResponseDto(
                 receipt.getId(),
-                receipt.getStatus().name(),
-                "업로드 완료. 분석을 시작합니다."
+                receipt.getStatus().name(), // PENDING
+                "업로드 완료. 분석을 시작합니다." // 비동기 진행 중
         );
     }
 
@@ -95,46 +92,15 @@ public class ReceiptService {
                 .build();
     }
 
-    /** OCR 결과 파싱 → ReceiptItem 생성 (GPT 연동) */
+    /** (수동) 파싱 실행 — 필요 시 유지 */
     @Transactional
     public void parse(Long receiptId) {
         Receipt r = getReceiptOrThrow(receiptId);
-
         if (r.getRawText() == null || r.getRawText().isBlank()) {
-            log.warn("[PARSE] rawText 비어있음. receiptId={}", receiptId);
             r.setStatus(ReceiptStatus.FAILED);
             return;
         }
-
-        try {
-            List<ParsedItemDto> parsed = gptService.parseReceipt(r.getRawText());
-            int saved = 0;
-
-            for (ParsedItemDto dto : parsed) {
-                if (dto.getName() == null || dto.getName().isBlank()) continue;
-
-                int qty = (dto.getQuantity() == null || dto.getQuantity() <= 0) ? 1 : dto.getQuantity();
-                Category category = safeCategory(dto.getCategory());
-
-                ReceiptItem item = ReceiptItem.builder()
-                        .receipt(r)
-                        .name(dto.getName())
-                        .quantity(qty)
-                        .category(category)
-                        .source("GPT")
-                        .build();
-                receiptItemRepository.save(item);
-                saved++;
-            }
-
-            r.setStatus(saved > 0 ? ReceiptStatus.PARSED : ReceiptStatus.FAILED);
-            if (saved == 0) {
-                log.warn("[PARSE] 저장된 항목이 0개. GPT 응답 점검 필요. receiptId={}", receiptId);
-            }
-        } catch (Exception e) {
-            log.error("[PARSE] 예외 발생. FAILED 전환. receiptId={}", receiptId, e);
-            r.setStatus(ReceiptStatus.FAILED);
-        }
+        receiptParseService.parseAsync(receiptId);
     }
 
     /** 항목 수정 */
@@ -181,7 +147,7 @@ public class ReceiptService {
         return item.getId();
     }
 
-    /** 저장하기(확정) → DisposalHistory로 이동/복사 */
+    /** 저장하기(확정) → DisposalHistory에 적재 */
     @Transactional
     public Map<String, Object> confirm(Long userId, Long receiptId, ConfirmRequest req) {
         Receipt r = getReceiptOrThrow(receiptId);
@@ -243,11 +209,5 @@ public class ReceiptService {
                 .category(it.getCategory())
                 .guide_page_url(guideUrl(it.getCategory()))
                 .build();
-    }
-
-    private Category safeCategory(String s) {
-        if (s == null) return Category.ETC;
-        try { return Category.valueOf(s.trim().toUpperCase()); }
-        catch (Exception e) { return Category.ETC; }
     }
 }
