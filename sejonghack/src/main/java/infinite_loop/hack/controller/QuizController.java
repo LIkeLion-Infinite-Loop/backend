@@ -1,12 +1,11 @@
 package infinite_loop.hack.controller;
 
 import infinite_loop.hack.dto.QuizDtos.CreateSessionRes;
-import infinite_loop.hack.dto.QuizDtos.SubmitReq;
-import infinite_loop.hack.dto.QuizDtos.SubmitRes;
+import infinite_loop.hack.dto.QuizDtos.AnswerOneReq;
+import infinite_loop.hack.dto.QuizDtos.AnswerOneRes;
 import infinite_loop.hack.security.CustomUserDetails;
 import infinite_loop.hack.service.QuizService;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
@@ -19,46 +18,49 @@ public class QuizController {
     private final QuizService service;
 
     /**
-     * 퀴즈 세션 생성
      * POST /api/quiz/sessions
+     * Start a new quiz session.
+     * - If an ACTIVE session already exists, an ActiveSessionConflictException is thrown,
+     *   and handled by ApiExceptionHandler to return 409 with continuation info.
      */
     @PostMapping("/sessions")
-    public ResponseEntity<CreateSessionRes> create(Authentication auth) {
-        Long userId = currentUserId(auth);
+    public ResponseEntity<CreateSessionRes> start(Authentication authentication) {
+        Long userId = currentUserId(authentication);
         CreateSessionRes res = service.startSession(userId);
-        return ResponseEntity.status(HttpStatus.CREATED).body(res);
+        return ResponseEntity.ok(res);
     }
 
     /**
-     * 정답 제출
-     * POST /api/quiz/sessions/{sessionId}/submit
-     * Body: { "answers": [ { "itemId": 101, "answerIdx": 1 }, ... ] }
-     *  - answerIdx는 1~4 범위
+     * GET /api/quiz/sessions/active
+     * Return the current ACTIVE session snapshot, or 404 if none.
      */
-    @PostMapping("/sessions/{sessionId}/submit")
-    public ResponseEntity<SubmitRes> submit(@PathVariable Long sessionId,
-                                            @RequestBody SubmitReq req,
-                                            Authentication auth) {
-        Long userId = currentUserId(auth);
-        SubmitRes res = service.submit(userId, sessionId, req.answers());
-        return ResponseEntity.ok(res);
-    }
-
-    // 활성 세션 조회 (재접속용)
     @GetMapping("/sessions/active")
-    public ResponseEntity<CreateSessionRes> getActive(Authentication auth) {
-        Long userId = currentUserId(auth);
-        CreateSessionRes res = service.getActive(userId);
-        if (res == null) return ResponseEntity.noContent().build(); // 204
-        return ResponseEntity.ok(res);
+    public ResponseEntity<CreateSessionRes> getActive(Authentication authentication) {
+        Long userId = currentUserId(authentication);
+        return ResponseEntity.of(service.getActiveSessionSnapshot(userId));
     }
 
-    // 특정 세션 ID로 조회 (409 응답의 Location 헤더 따라가기)
+    /**
+     * GET /api/quiz/sessions/{sessionId}
+     * Return a specific session snapshot (including items).
+     */
     @GetMapping("/sessions/{sessionId}")
-    public ResponseEntity<CreateSessionRes> getById(@PathVariable Long sessionId, Authentication auth) {
-        Long userId = currentUserId(auth);
-        CreateSessionRes res = service.getById(userId, sessionId);
-        if (res == null) return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
+    public ResponseEntity<CreateSessionRes> getSession(Authentication authentication,
+                                                       @PathVariable Long sessionId) {
+        Long userId = currentUserId(authentication);
+        return ResponseEntity.of(service.getSessionSnapshot(userId, sessionId));
+    }
+
+    /**
+     * POST /api/quiz/sessions/{sessionId}/answer
+     * Submit a single answer for one item (one-by-one flow).
+     */
+    @PostMapping("/sessions/{sessionId}/answer")
+    public ResponseEntity<AnswerOneRes> answerOne(Authentication authentication,
+                                                  @PathVariable Long sessionId,
+                                                  @RequestBody AnswerOneReq req) {
+        Long userId = currentUserId(authentication);
+        AnswerOneRes res = service.answerOne(userId, sessionId, req.itemId(), req.answerIdx());
         return ResponseEntity.ok(res);
     }
 
