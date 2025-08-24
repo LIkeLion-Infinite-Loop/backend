@@ -1,37 +1,37 @@
 package infinite_loop.hack.dto;
 
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 import java.time.Instant;
 import java.util.List;
 
-import com.fasterxml.jackson.annotation.JsonCreator;
-import com.fasterxml.jackson.annotation.JsonProperty;
-import com.fasterxml.jackson.annotation.JsonAlias;
-
 /**
  * DTOs for Quiz feature.
- * Now supports one-by-one answering instead of submitting all 3 at once.
+ * - One-by-one answering
+ * - No daily attempt limits (attemptsLeftToday = -1)
+ * - No session expiry (expiresAt may be null)
  */
 public class QuizDtos {
 
-    /** Session creation response (also reused for fetching a session snapshot). */
+    /** Session creation / snapshot response. */
     public record CreateSessionRes(
             Long sessionId,
-            Instant expiresAt,
+            Instant expiresAt,               // null when expiry disabled
             int numQuestions,
             String category,
-            int attemptsLeftToday,
+            int attemptsLeftToday,           // -1 when unlimited
             List<Item> items
     ) {
         public record Item(Long itemId, int order, String prompt, List<String> choices) {}
     }
 
-    /** Request: submit a single answer for one item. */
+    /** Request: submit a single answer for one item. (tolerant parser for number/string) */
     public record AnswerOneReq(Long itemId, Integer answerIdx) {
         @JsonCreator
         public static AnswerOneReq create(
                 @JsonProperty("itemId") Object itemId,
                 @JsonProperty("answerIdx") Object answerIdx
-                // (선택) @JsonProperty("answerIndex") Object answerIndex 로도 추가 가능
         ) {
             Long iid = null;
             if (itemId != null) {
@@ -45,10 +45,7 @@ public class QuizDtos {
         }
     }
 
-    /**
-     * Response after answering one item.
-     * If completed == true, this represents the final summary for the session.
-     */
+    /** Response after answering one item. */
     public record AnswerOneRes(
             Long sessionId,
             Long itemId,
@@ -70,4 +67,16 @@ public class QuizDtos {
             int awardedPoints,
             Instant submittedAt
     ) {}
+
+    /** Attempts today: kept for backward compatibility (unlimited = true). */
+    public record AttemptsTodayRes(
+            int attemptsLeftToday,   // -1 when unlimited
+            boolean unlimited,
+            Window window            // may be null when unlimited
+    ) {
+        public record Window(
+                String timezone,
+                Instant resetsAt
+        ) {}
+    }
 }
