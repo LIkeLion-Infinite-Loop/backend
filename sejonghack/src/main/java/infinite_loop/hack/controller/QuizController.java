@@ -3,6 +3,7 @@ package infinite_loop.hack.controller;
 import infinite_loop.hack.dto.QuizDtos.CreateSessionRes;
 import infinite_loop.hack.dto.QuizDtos.AnswerOneReq;
 import infinite_loop.hack.dto.QuizDtos.AnswerOneRes;
+import infinite_loop.hack.dto.QuizDtos.AttemptsTodayRes;
 import infinite_loop.hack.security.CustomUserDetails;
 import infinite_loop.hack.service.QuizService;
 import lombok.RequiredArgsConstructor;
@@ -17,12 +18,7 @@ public class QuizController {
 
     private final QuizService service;
 
-    /**
-     * POST /api/quiz/sessions
-     * Start a new quiz session.
-     * - If an ACTIVE session already exists, an ActiveSessionConflictException is thrown,
-     *   and handled by ApiExceptionHandler to return 409 with continuation info.
-     */
+    /** POST /api/quiz/sessions — start a new quiz session (409 if one active). */
     @PostMapping("/sessions")
     public ResponseEntity<CreateSessionRes> start(Authentication authentication) {
         Long userId = currentUserId(authentication);
@@ -30,20 +26,14 @@ public class QuizController {
         return ResponseEntity.ok(res);
     }
 
-    /**
-     * GET /api/quiz/sessions/active
-     * Return the current ACTIVE session snapshot, or 404 if none.
-     */
+    /** GET /api/quiz/sessions/active — current ACTIVE session snapshot, or 404. */
     @GetMapping("/sessions/active")
     public ResponseEntity<CreateSessionRes> getActive(Authentication authentication) {
         Long userId = currentUserId(authentication);
         return ResponseEntity.of(service.getActiveSessionSnapshot(userId));
     }
 
-    /**
-     * GET /api/quiz/sessions/{sessionId}
-     * Return a specific session snapshot (including items).
-     */
+    /** GET /api/quiz/sessions/{sessionId} — specific session snapshot. */
     @GetMapping("/sessions/{sessionId}")
     public ResponseEntity<CreateSessionRes> getSession(Authentication authentication,
                                                        @PathVariable Long sessionId) {
@@ -51,10 +41,7 @@ public class QuizController {
         return ResponseEntity.of(service.getSessionSnapshot(userId, sessionId));
     }
 
-    /**
-     * POST /api/quiz/sessions/{sessionId}/answer
-     * Submit a single answer for one item (one-by-one flow).
-     */
+    /** POST /api/quiz/sessions/{sessionId}/answer — submit single answer. */
     @PostMapping("/sessions/{sessionId}/answer")
     public ResponseEntity<AnswerOneRes> answerOne(Authentication authentication,
                                                   @PathVariable Long sessionId,
@@ -64,9 +51,15 @@ public class QuizController {
         return ResponseEntity.ok(res);
     }
 
-    /**
-     * JWT에서 현재 사용자 id 추출
-     */
+    /** NEW: GET /api/quiz/attempts/today — remaining attempts today (KST). */
+    @GetMapping("/attempts/today")
+    public ResponseEntity<AttemptsTodayRes> attemptsToday(Authentication authentication) {
+        Long userId = currentUserId(authentication);
+        AttemptsTodayRes res = service.getAttemptsToday(userId);
+        return ResponseEntity.ok(res);
+    }
+
+    /** Extract user id from Authentication. */
     private Long currentUserId(Authentication authentication) {
         if (authentication == null || authentication.getPrincipal() == null) {
             throw new org.springframework.security.access.AccessDeniedException("UNAUTHENTICATED");
