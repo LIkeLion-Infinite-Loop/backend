@@ -18,72 +18,43 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.List;
-import java.util.Optional;
+import java.util.*;
+import java.util.stream.Collectors;
 
-/**
- * Quiz service (one-by-one flow)
- * - No time-based expiry (API expiresAt is null)
- * - No daily attempt limits (attemptsLeftToday = -1)
- * - Session closes when all questions are answered -> Status.SUBMITTED
- * - Starting with existing ACTIVE session -> 409 via ActiveSessionConflictException
- */
 @Service
 @RequiredArgsConstructor
+@Transactional
 public class QuizService {
-
-    // ===== Settings =====
-    private static final int QUESTIONS_PER_SESSION = 3;
-    private static final int POINT_PER_CORRECT = 10;
-
-    // If DB column quiz_session.expires_at is NOT NULL, store a far-future value.
-    // API responses will still expose expiresAt=null so the UI treats it as "no expiry".
-    private static final boolean USE_FAR_FUTURE_FOR_DB = true;
-    private static final Instant FAR_FUTURE = Instant.parse("2100-01-01T00:00:00Z");
-
-    // ===== Deps =====
-    private final OpenAiClient openai;
     private final QuizSessionRepository sessionRepo;
     private final QuizSessionItemRepository itemRepo;
-    private final PointService pointService;
+    private final OpenAiClient openai;
 
-    // ===== Helpers =====
-    private Instant persistableExpiresAt() {
-        return USE_FAR_FUTURE_FOR_DB ? FAR_FUTURE : null;
-    }
-    private Instant publicExpiresAt(Instant raw) {
-        // TTL disabled -> always expose null to clients
-        return null;
+    private static final int QUESTIONS_PER_SESSION = 3;
+    private static final int POINTS_PER_CORRECT = 10;
+
+    /** Attempts are unlimited now; retain contract for callers. */
+    @Transactional(readOnly = true)
+    public AttemptsTodayRes getAttemptsToday(Long userId) {
+        return new AttemptsTodayRes(-1, true, null);
     }
 
-    /**
-     * Start a new session.
-     * - If ACTIVE session exists -> throw ActiveSessionConflictException (409 with continuation)
-     * - No TTL, no daily limit
-     */
-    @Transactional
+    /** Create a new session; if an ACTIVE session exists, throw 409 (handled globally). */
     public CreateSessionRes startSession(Long userId) {
-        Optional<QuizSession> existing = sessionRepo.findFirstByUserIdAndStatus(userId, Status.ACTIVE);
-        if (existing.isPresent()) {
-            throw new ActiveSessionConflictException(existing.get().getId());
+        Optional<QuizSession> active = sessionRepo.findFirstByUserIdAndStatus(userId, Status.ACTIVE);
+        if (active.isPresent()) {
+            throw new ActiveSessionConflictException(active.get().getId());
         }
 
-        // Prepare questions (3 items)
         String category = QuizConstants.pickRandomCategory();
+        // GPT returns exactly 3 questions for the given category.
         GptQuizResponse g = openai.createThreeQuestions(category);
-        if (g == null || g.questions == null || g.questions.size() != QUESTIONS_PER_SESSION) {
-            throw new IllegalStateException("QUIZ_GENERATION_FAILED");
-        }
 
-        // Create session (no real expiry)
         QuizSession s = new QuizSession();
         s.setUserId(userId);
         s.setCategory(category);
         s.setNumQuestions(QUESTIONS_PER_SESSION);
         s.setStartedAt(Instant.now());
-        s.setExpiresAt(persistableExpiresAt()); // DB safe; API will show null
+        s.setExpiresAt(null); // no expiry persisted
         s.setStatus(Status.ACTIVE);
         s.setTotalAwardedPoints(0);
         s = sessionRepo.save(s);
@@ -92,210 +63,212 @@ public class QuizService {
         List<CreateSessionRes.Item> items = new ArrayList<>();
         int order = 1;
         for (var q : g.questions) {
-            // Defensive check for 4 choices
             if (q.choices == null || q.choices.size() != 4) {
-                throw new IllegalStateException("QUIZ_GENERATION_FAILED");
+                throw new IllegalStateException("GPT returned invalid choices length");
             }
+            // Shuffle choices while tracking correct index
+            List<String> choices = new ArrayList<>(q.choices);
+            int originalCorrect = q.correct_index != null ? q.correct_index : 1;
+            if (originalCorrect < 1 || originalCorrect > 4) originalCorrect = 1;
 
-            QuizSessionItem it = new QuizSessionItem();
-            it.setSessionId(s.getId());
-            it.setItemOrder(order);
-            it.setPrompt(q.prompt);
-            it.setChoice1(q.choices.get(0));
-            it.setChoice2(q.choices.get(1));
-            it.setChoice3(q.choices.get(2));
-            it.setChoice4(q.choices.get(3));
-            it.setCorrectIndex(q.correct_index); // 1..4
-            itemRepo.save(it);
+            // pair choices with original index
+            List<int[]> idxMap = new ArrayList<>();
+            for (int i = 0; i < choices.size(); i++) idxMap.add(new int[]{i + 1, i}); // [1-based original, 0-based position]
+
+            Collections.shuffle(idxMap);
+            String c1 = choices.get(idxMap.get(0)[1]);
+            String c2 = choices.get(idxMap.get(1)[1]);
+            String c3 = choices.get(idxMap.get(2)[1]);
+            String c4 = choices.get(idxMap.get(3)[1]);
+            int correctIndexAfterShuffle = -1;
+            for (int i = 0; i < idxMap.size(); i++) {
+                if (idxMap.get(i)[0] == originalCorrect) {
+                    correctIndexAfterShuffle = i + 1;
+                    break;
+                }
+            }
+            if (correctIndexAfterShuffle <= 0) correctIndexAfterShuffle = 1;
+
+            QuizSessionItem item = new QuizSessionItem();
+            item.setSessionId(s.getId());
+            item.setItemOrder(order++);
+            item.setPrompt(q.prompt);
+            item.setChoice1(c1);
+            item.setChoice2(c2);
+            item.setChoice3(c3);
+            item.setChoice4(c4);
+            item.setCorrectIndex(correctIndexAfterShuffle);
+            item.setUserAnswerIndex(null);
+            item.setIsCorrect(null);
+            item.setAwardedPoints(0);
+            item.setExplanation(q.explanation); // NEW: store explanation
+            itemRepo.save(item);
 
             items.add(new CreateSessionRes.Item(
-                    it.getId(),
-                    order,
-                    it.getPrompt(),
-                    List.of(it.getChoice1(), it.getChoice2(), it.getChoice3(), it.getChoice4())
+                    item.getId(),
+                    item.getItemOrder(),
+                    item.getPrompt(),
+                    List.of(item.getChoice1(), item.getChoice2(), item.getChoice3(), item.getChoice4()),
+                    null
             ));
-            order++;
         }
 
-        // attempts: unlimited (-1)
         return new CreateSessionRes(
                 s.getId(),
-                publicExpiresAt(s.getExpiresAt()),
-                s.getNumQuestions(),
+                s.getStatus().name(),
                 s.getCategory(),
-                -1, // unlimited
+                s.getStartedAt(),
+                s.getExpiresAt(),
+                s.getTotalAwardedPoints(),
+                QUESTIONS_PER_SESSION,
+                1, // next item is 1 at start
                 items
         );
     }
 
-    /** ACTIVE 세션 스냅샷 (없으면 Optional.empty) */
+    /** Snapshot of current ACTIVE session, if any. */
     @Transactional(readOnly = true)
     public Optional<CreateSessionRes> getActiveSessionSnapshot(Long userId) {
         return sessionRepo.findFirstByUserIdAndStatus(userId, Status.ACTIVE)
-                .map(this::toSnapshot);
+                .map(s -> toSnapshot(s, itemsByOrder(s.getId())));
     }
 
-    /** 특정 세션 스냅샷 (본인 소유 아닐 경우 empty) */
+    /** Snapshot of a specific session (only if owned by user). */
     @Transactional(readOnly = true)
     public Optional<CreateSessionRes> getSessionSnapshot(Long userId, Long sessionId) {
         return sessionRepo.findById(sessionId)
-                .filter(s -> s.getUserId().equals(userId))
-                .map(this::toSnapshot);
+                .filter(s -> Objects.equals(s.getUserId(), userId))
+                .map(s -> toSnapshot(s, itemsByOrder(s.getId())));
     }
 
-    private CreateSessionRes toSnapshot(QuizSession s) {
-        var itemsDb = itemRepo.findBySessionIdOrderByItemOrder(s.getId());
-        List<CreateSessionRes.Item> items = new ArrayList<>();
-        for (QuizSessionItem it : itemsDb) {
-            items.add(new CreateSessionRes.Item(
-                    it.getId(),
-                    it.getItemOrder(),
-                    it.getPrompt(),
-                    List.of(it.getChoice1(), it.getChoice2(), it.getChoice3(), it.getChoice4())
-            ));
-        }
-        return new CreateSessionRes(
-                s.getId(),
-                publicExpiresAt(s.getExpiresAt()), // expose null
-                s.getNumQuestions(),
-                s.getCategory(),
-                -1, // unlimited
-                items
-        );
-    }
-
-    /**
-     * Submit one answer (one-by-one).
-     * - Validates ownership, status, and item-session relation
-     * - Marks correct/incorrect and accumulates points
-     * - When all answered, closes session (SUBMITTED) and grants points once
-     * - On re-submission to a closed session, throws SessionClosedException -> 409
-     */
-    @Transactional
+    /** Submit one answer and return immediate feedback (with explanation). */
     public AnswerOneRes answerOne(Long userId, Long sessionId, Long itemId, Integer answerIdx) {
         if (answerIdx == null || answerIdx < 1 || answerIdx > 4) {
-            throw new IllegalArgumentException("INVALID_ANSWER_INDEX");
+            throw new IllegalArgumentException("answerIdx must be 1..4");
         }
-
         QuizSession s = sessionRepo.findById(sessionId)
                 .orElseThrow(() -> new IllegalArgumentException("SESSION_NOT_FOUND"));
-        if (!s.getUserId().equals(userId)) {
+        if (!Objects.equals(s.getUserId(), userId)) {
             throw new org.springframework.security.access.AccessDeniedException("FORBIDDEN");
         }
-
-        // Closed session? (SUBMITTED)
         if (s.getStatus() != Status.ACTIVE) {
             throw new SessionClosedException(s.getId(), s.getStatus().name());
         }
 
         QuizSessionItem item = itemRepo.findById(itemId)
                 .orElseThrow(() -> new IllegalArgumentException("ITEM_NOT_FOUND"));
-        if (!item.getSessionId().equals(sessionId)) {
-            throw new IllegalArgumentException("ITEM_NOT_IN_SESSION");
+        if (!Objects.equals(item.getSessionId(), s.getId())) {
+            throw new IllegalArgumentException("ITEM_SESSION_MISMATCH");
         }
 
-        boolean wasAnswered = (item.getUserAnswerIndex() != null);
-        boolean correct;
-        int award = 0;
-
-        if (!wasAnswered) {
-            item.setUserAnswerIndex(answerIdx);
-            correct = (answerIdx == item.getCorrectIndex());
-            item.setIsCorrect(correct);
-            if (correct) {
-                award = POINT_PER_CORRECT;
-                item.setAwardedPoints(award);
-                s.setTotalAwardedPoints(s.getTotalAwardedPoints() + award);
-            } else {
-                item.setAwardedPoints(0); // prevent future NPEs
-            }
-            itemRepo.save(item);
-            sessionRepo.save(s);
-        } else {
-            correct = Boolean.TRUE.equals(item.getIsCorrect());
-            Integer ap = item.getAwardedPoints();
-            award = (ap != null ? ap : 0); // null-safe when previously wrong
+        // Idempotent: if already answered, just return previous result
+        if (item.getUserAnswerIndex() != null) {
+            boolean correctPrev = Boolean.TRUE.equals(item.getIsCorrect());
+            boolean finishedPrev = finished(itemsByOrder(s.getId()));
+            Integer nextOrderPrev = nextItemOrder(itemsByOrder(s.getId()));
+            return new AnswerOneRes(
+                    item.getId(),
+                    correctPrev,
+                    item.getCorrectIndex(),
+                    item.getAwardedPoints(),
+                    s.getTotalAwardedPoints(),
+                    finishedPrev,
+                    nextOrderPrev,
+                    item.getExplanation()
+            );
         }
 
-        List<QuizSessionItem> items = itemRepo.findBySessionIdOrderByItemOrder(sessionId);
-        long answered = items.stream().filter(it -> it.getUserAnswerIndex() != null).count();
-        int total = items.size();
+        // Evaluate
+        boolean correct = (answerIdx == item.getCorrectIndex());
+        int awarded = correct ? POINTS_PER_CORRECT : 0;
 
-        boolean completed = (answered >= total);
-        Integer nextOrder = null;
+        item.setUserAnswerIndex(answerIdx);
+        item.setIsCorrect(correct);
+        item.setAwardedPoints(awarded);
+        itemRepo.save(item);
 
-        if (!completed) {
-            nextOrder = items.stream()
-                    .filter(it -> it.getUserAnswerIndex() == null)
-                    .min(Comparator.comparingInt(QuizSessionItem::getItemOrder))
-                    .map(QuizSessionItem::getItemOrder)
-                    .orElse(null);
-        } else {
-            // Close session
+        s.setTotalAwardedPoints(s.getTotalAwardedPoints() + awarded);
+
+        // If this was the last unanswered item, mark submitted
+        List<QuizSessionItem> items = itemsByOrder(s.getId());
+        boolean finished = finished(items);
+        if (finished) {
             s.setStatus(Status.SUBMITTED);
-            // If you have finishedAt column: s.setFinishedAt(Instant.now());
-            sessionRepo.save(s);
-
-            // Grant points once at completion
-            if (s.getTotalAwardedPoints() > 0) {
-                pointService.addPoints(userId, s.getTotalAwardedPoints(), "QUIZ");
-            }
         }
+        sessionRepo.save(s);
+
+        Integer nextOrder = nextItemOrder(items);
 
         return new AnswerOneRes(
-                s.getId(),
                 item.getId(),
                 correct,
-                award,
-                (int) answered,
-                total,
-                completed,
+                item.getCorrectIndex(),
+                awarded,
+                s.getTotalAwardedPoints(),
+                finished,
                 nextOrder,
-                Instant.now()
+                item.getExplanation() // NEW: include explanation
         );
     }
 
-    /**
-     * Attempts today (kept for backward compatibility).
-     * Since limits are disabled, always returns unlimited.
-     */
-    @Transactional(readOnly = true)
-    public AttemptsTodayRes getAttemptsToday(Long userId) {
-        return new AttemptsTodayRes(
-                -1,          // attemptsLeftToday = -1
-                true,        // unlimited
-                null         // window info not applicable
-        );
-    }
+    // ===== Helpers =====
 
-    /**
-     * Continuation info for 409 response headers/body when an ACTIVE session already exists.
-     */
     @Transactional(readOnly = true)
     public ContinuationInfo getContinuationInfo(Long sessionId) {
-        QuizSession s = sessionRepo.findById(sessionId)
-                .orElseThrow(() -> new IllegalArgumentException("SESSION_NOT_FOUND"));
-
-        List<QuizSessionItem> items = itemRepo.findBySessionIdOrderByItemOrder(sessionId);
-        int total = items.size();
-        int answered = (int) items.stream().filter(it -> it.getUserAnswerIndex() != null).count();
-        Integer nextOrder = items.stream()
-                .filter(it -> it.getUserAnswerIndex() == null)
-                .min(Comparator.comparingInt(QuizSessionItem::getItemOrder))
-                .map(QuizSessionItem::getItemOrder)
-                .orElse(null);
-
+        QuizSession s = sessionRepo.findById(sessionId).orElse(null);
+        if (s == null) return null;
+        List<QuizSessionItem> items = itemsByOrder(s.getId());
         return new ContinuationInfo(
                 s.getId(),
                 s.getStatus().name(),
-                publicExpiresAt(s.getExpiresAt()), // expose null
-                nextOrder,
-                answered,
-                total
+                s.getExpiresAt(),
+                nextItemOrder(items),
+                (int) items.stream().filter(it -> it.getUserAnswerIndex() != null).count(),
+                items.size()
         );
     }
 
-    /** Small immutable view used by exception handler for 409 continuation details. */
+    private List<QuizSessionItem> itemsByOrder(Long sessionId) {
+        return itemRepo.findBySessionIdOrderByItemOrder(sessionId);
+    }
+
+    private boolean finished(List<QuizSessionItem> items) {
+        return items.stream().allMatch(it -> it.getUserAnswerIndex() != null);
+    }
+
+    private Integer nextItemOrder(List<QuizSessionItem> items) {
+        return items.stream()
+                .filter(it -> it.getUserAnswerIndex() == null)
+                .map(QuizSessionItem::getItemOrder)
+                .findFirst()
+                .orElse(null);
+    }
+
+    private CreateSessionRes toSnapshot(QuizSession s, List<QuizSessionItem> items) {
+        Integer next = nextItemOrder(items);
+        List<CreateSessionRes.Item> view = items.stream()
+                .map(it -> new CreateSessionRes.Item(
+                        it.getId(),
+                        it.getItemOrder(),
+                        it.getPrompt(),
+                        List.of(it.getChoice1(), it.getChoice2(), it.getChoice3(), it.getChoice4()),
+                        it.getUserAnswerIndex()
+                ))
+                .collect(Collectors.toList());
+        return new CreateSessionRes(
+                s.getId(),
+                s.getStatus().name(),
+                s.getCategory(),
+                s.getStartedAt(),
+                s.getExpiresAt(),
+                s.getTotalAwardedPoints(),
+                items.size(),
+                next,
+                view
+        );
+    }
+
+    /** Lightweight view used by exception handler to hint continuation. */
     public record ContinuationInfo(
             Long sessionId,
             String status,
