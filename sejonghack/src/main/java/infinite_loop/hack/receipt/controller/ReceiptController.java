@@ -24,7 +24,7 @@ public class ReceiptController {
     @PostMapping(value = "/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<ReceiptUploadResponseDto> uploadReceipt(
             @AuthenticationPrincipal(expression = "id") Long userId,
-            @RequestPart MultipartFile file
+            @RequestParam("file") MultipartFile file // ← 폼 필드(file)와 매칭
     ) {
         ReceiptUploadResponseDto resp = receiptService.upload(userId, file);
         return ResponseEntity.ok(resp);
