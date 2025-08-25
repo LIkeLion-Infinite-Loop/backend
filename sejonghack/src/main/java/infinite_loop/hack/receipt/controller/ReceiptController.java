@@ -29,16 +29,7 @@ public class ReceiptController {
         ReceiptUploadResponseDto resp = receiptService.upload(userId, file);
         return ResponseEntity.ok(resp);
     }
-
-    /** (B) 같은 경로에서 raw 이미지/바이너리도 지원 (key 없이 파일만 전송) */
-    @PostMapping(
-            value = "/upload",
-            consumes = {
-                    MediaType.IMAGE_JPEG_VALUE,
-                    MediaType.IMAGE_PNG_VALUE,
-                    MediaType.APPLICATION_OCTET_STREAM_VALUE
-            }
-    )
+    
     public ResponseEntity<ReceiptUploadResponseDto> uploadReceiptRaw(
             @AuthenticationPrincipal(expression = "id") Long userId,
             HttpServletRequest request
