@@ -7,65 +7,61 @@ import java.time.Instant;
 import java.util.List;
 
 /**
- * DTOs for Quiz feature.
- * - One-by-one answering
- * - No daily attempt limits (attemptsLeftToday = -1)
- * - No session expiry (expiresAt may be null)
+ * DTOs for Quiz feature (one-by-one answering).
+ * - Attempts are unlimited (attemptsLeftToday = -1, unlimited = true)
+ * - Session expiry may be null.
+ * - Each answer response now includes an explanation (feedback).
  */
 public class QuizDtos {
 
-    /** Session creation / snapshot response. */
+    /** Create-session / snapshot response. */
     public record CreateSessionRes(
             Long sessionId,
-            Instant expiresAt,               // null when expiry disabled
-            int numQuestions,
+            String status,
             String category,
-            int attemptsLeftToday,           // -1 when unlimited
-            List<Item> items
+            Instant startedAt,
+            Instant expiresAt,             // may be null
+            int totalAwardedPoints,
+            int total,                     // number of questions
+            Integer nextItemOrder,         // 1-based; null if finished
+            List<Item> items               // ordered by itemOrder
     ) {
-        public record Item(Long itemId, int order, String prompt, List<String> choices) {}
+        public record Item(
+                Long itemId,
+                int itemOrder,             // 1..N
+                String prompt,
+                List<String> choices,      // 4 choices; order shown to the user
+                Integer userAnswerIdx      // null if not answered yet; 1..4 otherwise
+        ) {}
     }
 
-    /** Request: submit a single answer for one item. (tolerant parser for number/string) */
-    public record AnswerOneReq(Long itemId, Integer answerIdx) {
+    /** Submit-one-answer request. */
+    public static final class AnswerOneReq {
+        private final Long itemId;
+        private final Integer answerIdx; // 1..4
+
         @JsonCreator
-        public static AnswerOneReq create(
-                @JsonProperty("itemId") Object itemId,
-                @JsonProperty("answerIdx") Object answerIdx
+        public AnswerOneReq(
+                @JsonProperty("item_id") Long itemId,
+                @JsonProperty("answer_idx") Integer answerIdx
         ) {
-            Long iid = null;
-            if (itemId != null) {
-                try { iid = Long.valueOf(itemId.toString().trim()); } catch (Exception ignore) {}
-            }
-            Integer idx = null;
-            if (answerIdx != null) {
-                try { idx = Integer.valueOf(answerIdx.toString().trim()); } catch (Exception ignore) {}
-            }
-            return new AnswerOneReq(iid, idx);
+            this.itemId = itemId;
+            this.answerIdx = answerIdx;
         }
+        @JsonProperty("item_id") public Long itemId() { return itemId; }
+        @JsonProperty("answer_idx") public Integer answerIdx() { return answerIdx; }
     }
 
-    /** Response after answering one item. */
+    /** Submit-one-answer response (now with explanation). */
     public record AnswerOneRes(
-            Long sessionId,
             Long itemId,
             boolean correct,
-            int awardedPoints,
-            int answeredCount,
-            int total,
-            boolean completed,
-            Integer nextItemOrder,
-            Instant submittedAt
-    ) {}
-
-    /** Legacy-style final summary (kept for compatibility if needed). */
-    public record SubmitRes(
-            Long sessionId,
-            String category,
-            int correctCount,
-            int total,
-            int awardedPoints,
-            Instant submittedAt
+            int correctIndex,              // 1..4 (as displayed)
+            int awardedPoints,             // for this item
+            int totalAwardedPoints,        // accumulated in session
+            boolean finished,              // true if all items answered
+            Integer nextItemOrder,         // next 1-based order, null if finished
+            String explanation             // NEW: feedback text
     ) {}
 
     /** Attempts today: kept for backward compatibility (unlimited = true). */
