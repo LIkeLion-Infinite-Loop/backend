@@ -20,9 +20,13 @@ public class QuizSessionItem {
     private String choice3;
     private String choice4;
 
-    private int correctIndex;      // 1..4 (셔플 후 기준)
+    private int correctIndex;      // 1..4 (after shuffling)
 
     private Integer userAnswerIndex;
     private Boolean isCorrect;
     private int awardedPoints;
+
+    /** NEW: explanation/feedback text for this question. */
+    @Column(columnDefinition = "TEXT")
+    private String explanation;
 }
