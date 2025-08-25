@@ -1,10 +1,13 @@
 package infinite_loop.hack.service;
 
-import infinite_loop.hack.dto.QuizDtos.*;
+import infinite_loop.hack.dto.QuizDtos.AttemptsTodayRes;
+import infinite_loop.hack.dto.QuizDtos.CreateSessionRes;
+import infinite_loop.hack.dto.QuizDtos.AnswerOneRes;
 import infinite_loop.hack.domain.QuizSession;
 import infinite_loop.hack.domain.QuizSession.Status;
 import infinite_loop.hack.domain.QuizSessionItem;
 import infinite_loop.hack.exception.ActiveSessionConflictException;
+import infinite_loop.hack.exception.SessionClosedException;
 import infinite_loop.hack.openai.OpenAiClient;
 import infinite_loop.hack.openai.OpenAiClient.GptQuizResponse;
 import infinite_loop.hack.repository.QuizSessionItemRepository;
@@ -14,111 +17,125 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.*;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 
+/**
+ * Quiz service (one-by-one flow)
+ * - No time-based expiry (API expiresAt is null)
+ * - No daily attempt limits (attemptsLeftToday = -1)
+ * - Session closes when all questions are answered -> Status.SUBMITTED
+ * - Starting with existing ACTIVE session -> 409 via ActiveSessionConflictException
+ */
 @Service
 @RequiredArgsConstructor
 public class QuizService {
-    private static final ZoneId KST = ZoneId.of("Asia/Seoul");
-    private static final Duration SESSION_TTL = Duration.ofMinutes(10);
+
+    // ===== Settings =====
     private static final int QUESTIONS_PER_SESSION = 3;
     private static final int POINT_PER_CORRECT = 10;
 
+    // If DB column quiz_session.expires_at is NOT NULL, store a far-future value.
+    // API responses will still expose expiresAt=null so the UI treats it as "no expiry".
+    private static final boolean USE_FAR_FUTURE_FOR_DB = true;
+    private static final Instant FAR_FUTURE = Instant.parse("2100-01-01T00:00:00Z");
+
+    // ===== Deps =====
     private final OpenAiClient openai;
     private final QuizSessionRepository sessionRepo;
     private final QuizSessionItemRepository itemRepo;
     private final PointService pointService;
 
+    // ===== Helpers =====
+    private Instant persistableExpiresAt() {
+        return USE_FAR_FUTURE_FOR_DB ? FAR_FUTURE : null;
+    }
+    private Instant publicExpiresAt(Instant raw) {
+        // TTL disabled -> always expose null to clients
+        return null;
+    }
+
     /**
-     * Start a new session (throws ActiveSessionConflictException if active session exists).
+     * Start a new session.
+     * - If ACTIVE session exists -> throw ActiveSessionConflictException (409 with continuation)
+     * - No TTL, no daily limit
      */
     @Transactional
     public CreateSessionRes startSession(Long userId) {
-        // If an ACTIVE and not-expired session exists, return 409 via exception handler.
         Optional<QuizSession> existing = sessionRepo.findFirstByUserIdAndStatus(userId, Status.ACTIVE);
-        if (existing.isPresent() && !existing.get().isExpired()) {
+        if (existing.isPresent()) {
             throw new ActiveSessionConflictException(existing.get().getId());
         }
-        // If an ACTIVE session exists but expired, mark it EXPIRED.
-        existing.ifPresent(s -> {
-            if (s.isExpired()) {
-                s.setStatus(Status.EXPIRED);
-                sessionRepo.save(s);
-            }
-        });
 
-        // 1-day limit: 3 sessions/day (KST)
-        LocalDate today = QuizConstants.todayKST();
-        Instant start = today.atStartOfDay(KST).toInstant();
-        Instant end   = today.plusDays(1).atStartOfDay(KST).toInstant();
-        int usedToday = sessionRepo.findByUserIdAndStartedAtBetween(userId, start, end).size();
-        if (usedToday >= 3) {
-            throw new IllegalStateException("DAILY_LIMIT_EXCEEDED");
-        }
-
+        // Prepare questions (3 items)
         String category = QuizConstants.pickRandomCategory();
         GptQuizResponse g = openai.createThreeQuestions(category);
         if (g == null || g.questions == null || g.questions.size() != QUESTIONS_PER_SESSION) {
             throw new IllegalStateException("QUIZ_GENERATION_FAILED");
         }
 
+        // Create session (no real expiry)
         QuizSession s = new QuizSession();
         s.setUserId(userId);
         s.setCategory(category);
         s.setNumQuestions(QUESTIONS_PER_SESSION);
         s.setStartedAt(Instant.now());
-        s.setExpiresAt(Instant.now().plus(SESSION_TTL));
+        s.setExpiresAt(persistableExpiresAt()); // DB safe; API will show null
         s.setStatus(Status.ACTIVE);
         s.setTotalAwardedPoints(0);
         s = sessionRepo.save(s);
 
+        // Persist items
         List<CreateSessionRes.Item> items = new ArrayList<>();
         int order = 1;
         for (var q : g.questions) {
-            QuizSessionItem item = new QuizSessionItem();
-            item.setSessionId(s.getId());
-            item.setItemOrder(order);
-            item.setPrompt(q.prompt);
-            item.setChoice1(q.choices.get(0));
-            item.setChoice2(q.choices.get(1));
-            item.setChoice3(q.choices.get(2));
-            item.setChoice4(q.choices.get(3));
-            item.setCorrectIndex(q.correct_index); // 1..4
-            itemRepo.save(item);
+            // Defensive check for 4 choices
+            if (q.choices == null || q.choices.size() != 4) {
+                throw new IllegalStateException("QUIZ_GENERATION_FAILED");
+            }
+
+            QuizSessionItem it = new QuizSessionItem();
+            it.setSessionId(s.getId());
+            it.setItemOrder(order);
+            it.setPrompt(q.prompt);
+            it.setChoice1(q.choices.get(0));
+            it.setChoice2(q.choices.get(1));
+            it.setChoice3(q.choices.get(2));
+            it.setChoice4(q.choices.get(3));
+            it.setCorrectIndex(q.correct_index); // 1..4
+            itemRepo.save(it);
 
             items.add(new CreateSessionRes.Item(
-                    item.getId(),
+                    it.getId(),
                     order,
-                    item.getPrompt(),
-                    List.of(item.getChoice1(), item.getChoice2(), item.getChoice3(), item.getChoice4())
+                    it.getPrompt(),
+                    List.of(it.getChoice1(), it.getChoice2(), it.getChoice3(), it.getChoice4())
             ));
             order++;
         }
 
-        int attemptsLeft = Math.max(0, 3 - usedToday - 1);
+        // attempts: unlimited (-1)
         return new CreateSessionRes(
-                s.getId(), s.getExpiresAt(), s.getNumQuestions(), s.getCategory(),
-                attemptsLeft, items
+                s.getId(),
+                publicExpiresAt(s.getExpiresAt()),
+                s.getNumQuestions(),
+                s.getCategory(),
+                -1, // unlimited
+                items
         );
     }
 
-    /**
-     * Return active session snapshot for the user.
-     */
+    /** ACTIVE 세션 스냅샷 (없으면 Optional.empty) */
     @Transactional(readOnly = true)
     public Optional<CreateSessionRes> getActiveSessionSnapshot(Long userId) {
         return sessionRepo.findFirstByUserIdAndStatus(userId, Status.ACTIVE)
-                .filter(s -> !s.isExpired())
                 .map(this::toSnapshot);
     }
 
-    /**
-     * Return snapshot for specific session if it belongs to user.
-     */
+    /** 특정 세션 스냅샷 (본인 소유 아닐 경우 empty) */
     @Transactional(readOnly = true)
     public Optional<CreateSessionRes> getSessionSnapshot(Long userId, Long sessionId) {
         return sessionRepo.findById(sessionId)
@@ -127,31 +144,32 @@ public class QuizService {
     }
 
     private CreateSessionRes toSnapshot(QuizSession s) {
-        List<QuizSessionItem> items = itemRepo.findBySessionIdOrderByItemOrder(s.getId());
-        List<CreateSessionRes.Item> out = new ArrayList<>();
-        for (QuizSessionItem it : items) {
-            out.add(new CreateSessionRes.Item(
+        var itemsDb = itemRepo.findBySessionIdOrderByItemOrder(s.getId());
+        List<CreateSessionRes.Item> items = new ArrayList<>();
+        for (QuizSessionItem it : itemsDb) {
+            items.add(new CreateSessionRes.Item(
                     it.getId(),
                     it.getItemOrder(),
                     it.getPrompt(),
                     List.of(it.getChoice1(), it.getChoice2(), it.getChoice3(), it.getChoice4())
             ));
         }
-        // Attempts left (based on sessions started today)
-        LocalDate today = QuizConstants.todayKST();
-        Instant start = today.atStartOfDay(KST).toInstant();
-        Instant end   = today.plusDays(1).atStartOfDay(KST).toInstant();
-        int usedToday = sessionRepo.findByUserIdAndStartedAtBetween(s.getUserId(), start, end).size();
-        int attemptsLeft = Math.max(0, 3 - usedToday);
-
         return new CreateSessionRes(
-                s.getId(), s.getExpiresAt(), s.getNumQuestions(), s.getCategory(),
-                attemptsLeft, out
+                s.getId(),
+                publicExpiresAt(s.getExpiresAt()), // expose null
+                s.getNumQuestions(),
+                s.getCategory(),
+                -1, // unlimited
+                items
         );
     }
 
     /**
-     * Submit one answer (one-by-one flow).
+     * Submit one answer (one-by-one).
+     * - Validates ownership, status, and item-session relation
+     * - Marks correct/incorrect and accumulates points
+     * - When all answered, closes session (SUBMITTED) and grants points once
+     * - On re-submission to a closed session, throws SessionClosedException -> 409
      */
     @Transactional
     public AnswerOneRes answerOne(Long userId, Long sessionId, Long itemId, Integer answerIdx) {
@@ -164,13 +182,10 @@ public class QuizService {
         if (!s.getUserId().equals(userId)) {
             throw new org.springframework.security.access.AccessDeniedException("FORBIDDEN");
         }
-        if (s.isExpired()) {
-            s.setStatus(Status.EXPIRED);
-            sessionRepo.save(s);
-            throw new IllegalStateException("SESSION_EXPIRED");
-        }
+
+        // Closed session? (SUBMITTED)
         if (s.getStatus() != Status.ACTIVE) {
-            throw new IllegalStateException("SESSION_NOT_ACTIVE");
+            throw new SessionClosedException(s.getId(), s.getStatus().name());
         }
 
         QuizSessionItem item = itemRepo.findById(itemId)
@@ -191,21 +206,24 @@ public class QuizService {
                 award = POINT_PER_CORRECT;
                 item.setAwardedPoints(award);
                 s.setTotalAwardedPoints(s.getTotalAwardedPoints() + award);
+            } else {
+                item.setAwardedPoints(0); // prevent future NPEs
             }
             itemRepo.save(item);
             sessionRepo.save(s);
         } else {
-            correct = item.getIsCorrect() != null && item.getIsCorrect();
-            award = item.getAwardedPoints();
+            correct = Boolean.TRUE.equals(item.getIsCorrect());
+            Integer ap = item.getAwardedPoints();
+            award = (ap != null ? ap : 0); // null-safe when previously wrong
         }
 
-        // Progress calculation
         List<QuizSessionItem> items = itemRepo.findBySessionIdOrderByItemOrder(sessionId);
         long answered = items.stream().filter(it -> it.getUserAnswerIndex() != null).count();
         int total = items.size();
 
         boolean completed = (answered >= total);
         Integer nextOrder = null;
+
         if (!completed) {
             nextOrder = items.stream()
                     .filter(it -> it.getUserAnswerIndex() == null)
@@ -213,10 +231,12 @@ public class QuizService {
                     .map(QuizSessionItem::getItemOrder)
                     .orElse(null);
         } else {
-            // finalize session
+            // Close session
             s.setStatus(Status.SUBMITTED);
+            // If you have finishedAt column: s.setFinishedAt(Instant.now());
             sessionRepo.save(s);
-            // award accumulated points to user (once)
+
+            // Grant points once at completion
             if (s.getTotalAwardedPoints() > 0) {
                 pointService.addPoints(userId, s.getTotalAwardedPoints(), "QUIZ");
             }
@@ -236,12 +256,26 @@ public class QuizService {
     }
 
     /**
-     * Utility used by exception handler to compute continuation info for an ACTIVE session.
+     * Attempts today (kept for backward compatibility).
+     * Since limits are disabled, always returns unlimited.
+     */
+    @Transactional(readOnly = true)
+    public AttemptsTodayRes getAttemptsToday(Long userId) {
+        return new AttemptsTodayRes(
+                -1,          // attemptsLeftToday = -1
+                true,        // unlimited
+                null         // window info not applicable
+        );
+    }
+
+    /**
+     * Continuation info for 409 response headers/body when an ACTIVE session already exists.
      */
     @Transactional(readOnly = true)
     public ContinuationInfo getContinuationInfo(Long sessionId) {
         QuizSession s = sessionRepo.findById(sessionId)
                 .orElseThrow(() -> new IllegalArgumentException("SESSION_NOT_FOUND"));
+
         List<QuizSessionItem> items = itemRepo.findBySessionIdOrderByItemOrder(sessionId);
         int total = items.size();
         int answered = (int) items.stream().filter(it -> it.getUserAnswerIndex() != null).count();
@@ -250,17 +284,18 @@ public class QuizService {
                 .min(Comparator.comparingInt(QuizSessionItem::getItemOrder))
                 .map(QuizSessionItem::getItemOrder)
                 .orElse(null);
+
         return new ContinuationInfo(
                 s.getId(),
                 s.getStatus().name(),
-                s.getExpiresAt(),
+                publicExpiresAt(s.getExpiresAt()), // expose null
                 nextOrder,
                 answered,
                 total
         );
     }
 
-    /** Small DTO used internally by ApiExceptionHandler. */
+    /** Small immutable view used by exception handler for 409 continuation details. */
     public record ContinuationInfo(
             Long sessionId,
             String status,
